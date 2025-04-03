@@ -37,9 +37,9 @@ func main() {
 	failOnError(err, "Failed to declare an exchange")
 
 	// Declarar la cola movimiento_brusco
-	q, err := ch.QueueDeclare(
+	q1, err := ch.QueueDeclare(
 		"movimiento_brusco", // name
-		true,               // durable
+		true,                // durable
 		false,               // delete when unused
 		false,               // exclusive
 		false,               // no-wait
@@ -47,9 +47,9 @@ func main() {
 	)
 	failOnError(err, "Failed to declare a queue")
 
-	// Vincular la cola con el exchange y el routing key
+	// Vincular la cola movimiento_brusco con el exchange
 	err = ch.QueueBind(
-		q.Name,                     // queue name
+		q1.Name,                    // queue name
 		"sensor.movimiento.brusco", // routing key
 		"amq.topic",                // exchange
 		false,
@@ -57,28 +57,57 @@ func main() {
 	)
 	failOnError(err, "Failed to bind a queue")
 
-	// Consumir mensajes de la cola
-	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		true,   // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
+	// Declarar la nueva cola conteo_personas
+	q2, err := ch.QueueDeclare(
+		"conteo_personas", // name
+		true,              // durable
+		false,             // delete when unused
+		false,             // exclusive
+		false,             // no-wait
+		nil,               // arguments
 	)
-	failOnError(err, "Failed to register a consumer")
+	failOnError(err, "Failed to declare a queue")
+
+	// Vincular la cola conteo_personas con el exchange
+	err = ch.QueueBind(
+		q2.Name,                  // queue name
+		"sensor.conteo.personas", // routing key
+		"amq.topic",              // exchange
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to bind a queue")
+
+	// Consumir mensajes de la cola movimiento_brusco
+	msgs1, err := ch.Consume(
+		q1.Name, // queue
+		"",      // consumer
+		true,    // auto-ack
+		false,   // exclusive
+		false,   // no-local
+		false,   // no-wait
+		nil,     // args
+	)
+	failOnError(err, "Failed to register a consumer for movimiento_brusco")
+
+	// Consumir mensajes de la cola conteo_personas
+	msgs2, err := ch.Consume(
+		q2.Name, // queue
+		"",      // consumer
+		true,    // auto-ack
+		false,   // exclusive
+		false,   // no-local
+		false,   // no-wait
+		nil,     // args
+	)
+	failOnError(err, "Failed to register a consumer for conteo_personas")
 
 	var forever chan struct{}
 
+	// Procesar mensajes de movimiento_brusco
 	go func() {
-		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
-
-			log.Printf("Enviando solicitud POST con los siguientes datos: ")
-			log.Printf("URL: http://localhost:8080/movement/")
-			log.Printf("Headers: %v", map[string]string{"Content-Type": "text/plain"})
-			log.Printf("Body: %s", d.Body)
+		for d := range msgs1 {
+			log.Printf("Received a message from movimiento_brusco: %s", d.Body)
 
 			for i := 0; i < 3; i++ {
 				resp, err := client.R().
@@ -87,11 +116,32 @@ func main() {
 					Post("http://localhost:8080/movement/")
 
 				if err == nil && resp.StatusCode() < 500 {
-					log.Printf("Request POST exitoso, Código de estado: %d", resp.StatusCode())
+					log.Printf("Request POST exitoso a /movement/, Código de estado: %d", resp.StatusCode())
 					break
 				}
 
-				log.Printf("Intento %d fallido, reintentando...", i+1)
+				log.Printf("Intento %d fallido para /movement/, reintentando...", i+1)
+			}
+		}
+	}()
+
+	// Procesar mensajes de conteo_personas
+	go func() {
+		for d := range msgs2 {
+			log.Printf("Received a message from conteo_personas: %s", d.Body)
+
+			for i := 0; i < 3; i++ {
+				resp, err := client.R().
+					SetHeader("Content-Type", "text/plain").
+					SetBody(d.Body).
+					Post("http://localhost:8080/peopleGoUp/")
+
+				if err == nil && resp.StatusCode() < 500 {
+					log.Printf("Request POST exitoso a /person-count/, Código de estado: %d", resp.StatusCode())
+					break
+				}
+
+				log.Printf("Intento %d fallido para /person-count/, reintentando...", i+1)
 			}
 		}
 	}()
