@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+
 	"github.com/go-resty/resty/v2"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -23,44 +24,48 @@ func main() {
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 
+	// Declarar el exchange amq.topic
 	err = ch.ExchangeDeclare(
-		"broker1", // name
-		"fanout",  // type
-		true,      // durable
-		false,     // auto-deleted
-		false,     // internal
-		false,     // no-wait
-		nil,       // arguments
+		"amq.topic", // name
+		"topic",     // type
+		true,        // durable
+		false,       // auto-deleted
+		false,       // internal
+		false,       // no-wait
+		nil,         // arguments
 	)
 	failOnError(err, "Failed to declare an exchange")
 
+	// Declarar la cola movimiento_brusco
 	q, err := ch.QueueDeclare(
-		"transit", // name
-		false,     // durable
-		false,     // delete when unused
-		false,     // exclusive
-		false,     // no-wait
-		nil,       // arguments
+		"movimiento_brusco", // name
+		true,               // durable
+		false,               // delete when unused
+		false,               // exclusive
+		false,               // no-wait
+		nil,                 // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
 
+	// Vincular la cola con el exchange y el routing key
 	err = ch.QueueBind(
-		q.Name,   // queue name
-		"",       // routing key
-		"broker1",// exchange
+		q.Name,                     // queue name
+		"sensor.movimiento.brusco", // routing key
+		"amq.topic",                // exchange
 		false,
 		nil,
 	)
 	failOnError(err, "Failed to bind a queue")
 
+	// Consumir mensajes de la cola
 	msgs, err := ch.Consume(
-		q.Name,  // queue
-		"",      // consumer
-		true,    // auto-ack
-		false,   // exclusive
-		false,   // no-local
-		false,   // no-wait
-		nil,     // args
+		q.Name, // queue
+		"",     // consumer
+		true,   // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
 	)
 	failOnError(err, "Failed to register a consumer")
 
@@ -70,9 +75,8 @@ func main() {
 		for d := range msgs {
 			log.Printf("Received a message: %s", d.Body)
 
-			// Aquí estás usando el client para hacer solicitudes HTTP
 			log.Printf("Enviando solicitud POST con los siguientes datos: ")
-			log.Printf("URL: http://localhost:8082/transit/")
+			log.Printf("URL: http://localhost:8080/movement/")
 			log.Printf("Headers: %v", map[string]string{"Content-Type": "text/plain"})
 			log.Printf("Body: %s", d.Body)
 
@@ -80,7 +84,7 @@ func main() {
 				resp, err := client.R().
 					SetHeader("Content-Type", "text/plain").
 					SetBody(d.Body).
-					Post("http://localhost:8082/transit/")
+					Post("http://localhost:8080/movement/")
 
 				if err == nil && resp.StatusCode() < 500 {
 					log.Printf("Request POST exitoso, Código de estado: %d", resp.StatusCode())
